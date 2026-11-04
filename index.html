@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>スイカゲーム</title>
+<style>
+*{box-sizing:border-box}
+html{min-height:100%;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{margin:0;padding:clamp(8px,3vw,24px);padding-bottom:max(12px,env(safe-area-inset-bottom));background:#101426;color:#f5f6ff;font-family:system-ui,-apple-system,"Noto Sans JP",sans-serif;display:grid;place-items:center;min-height:100vh;min-height:100dvh;overscroll-behavior:none}
+main{width:min(100%,460px);background:#18213a;border:1px solid #405078;border-radius:20px;padding:clamp(10px,3vw,16px)}
+h1{text-align:center;margin:0 0 12px;font-size:clamp(22px,6vw,32px)}p{text-align:center;color:#b8c3df;font-size:clamp(12px,3.5vw,14px);line-height:1.55}
+.hud{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}.box{background:#101a30;border:1px solid #405078;border-radius:10px;padding:8px 14px;min-width:100px}.box small{display:block;color:#aab6d4}.box b{font-size:clamp(19px,5vw,23px)}
+canvas{width:100%;height:auto;max-height:calc(100dvh - 210px);object-fit:contain;display:block;margin-inline:auto;background:#101a30;border:2px solid #52648d;border-radius:12px;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+.controls{text-align:center;margin-top:12px}button{border:0;border-radius:10px;padding:12px 20px;min-height:44px;background:#8059e8;color:white;font-weight:bold;font-size:15px;cursor:pointer;touch-action:manipulation}
+button:focus-visible{outline:3px solid #fff;outline-offset:3px}
+#msg{min-height:22px}.overlay{display:none;position:fixed;inset:0;background:#000b;place-items:center;padding:max(16px,env(safe-area-inset-top)) 16px max(16px,env(safe-area-inset-bottom));z-index:5}.overlay.show{display:grid}.dialog{background:#202b49;border:1px solid #6879a5;border-radius:18px;padding:25px;text-align:center;width:min(330px,100%)}
+@media(max-width:360px){body{padding:6px}main{border-radius:14px}.box{min-width:88px;padding:7px 10px}}
+@media(orientation:landscape) and (max-height:540px){body{padding:6px;align-items:start}main{width:min(100%,420px);padding:8px}h1{font-size:20px;margin-bottom:6px}.hud{margin-bottom:6px}.box{padding:4px 9px}canvas{max-height:calc(100dvh - 115px);width:auto;max-width:100%}p{margin:6px 0;font-size:11px}.controls{margin-top:6px}button{min-height:38px;padding:8px 14px}}
+</style></head><body><main>
+<h1>🍉 スイカゲーム</h1><div class="hud"><div class="box"><small>SCORE</small><b id="score">0</b></div><div class="box"><small>NEXT</small><b id="next">🍒</b></div></div>
+<canvas id="c" width="420" height="560"></canvas><div class="controls"><button id="reset">最初から</button></div>
+<p id="msg">好きな場所をタップ／クリックしてフルーツを落とそう！</p>
+<p>同じフルーツ同士がぶつかると合体します。フルーツが上の危険ライン付近にとどまるとゲームオーバーです。</p>
+</main><div class="overlay" id="over"><div class="dialog"><h2>ゲームオーバー！</h2><p>スコア：<b id="final">0</b></p><button id="again">もう一度遊ぶ</button></div></div>
+<script>
+window.onerror=function(m,u,l){var e=document.getElementById('msg');if(e)e.textContent='エラー: '+m+' (line '+l+')'};
+(()=>{
+const c=document.getElementById('c'),x=c.getContext('2d'),W=420,H=560,L=16,R=404,F=544,D=100;
+const $=id=>document.getElementById(id),scoreEl=$('score'),nextEl=$('next');
+const types=[['🍒',14,'#d94d78'],['🍓',19,'#f16b8d'],['🍇',25,'#9861d5'],['🍊',31,'#f2a13d'],['🍎',37,'#e85b55'],['🍐',43,'#a8bd55'],['🍑',49,'#f18e83'],['🍍',55,'#e8bd4d'],['🍈',62,'#79b86e'],['🍉',70,'#e4515e']];
+const RAD=types.map(t=>t[1]);
+
+/* 軽量化: 背景・フルーツを事前に1回だけ描画して使い回す */
+const bg=document.createElement('canvas');bg.width=W;bg.height=H;
+(()=>{const b=bg.getContext('2d');let g=b.createLinearGradient(0,0,0,H);g.addColorStop(0,'#202d4c');g.addColorStop(1,'#111a30');b.fillStyle=g;b.fillRect(0,0,W,H);b.fillStyle='#53658e';b.fillRect(L-4,30,4,F-30);b.fillRect(R,30,4,F-30);b.fillRect(L-4,F,R-L+8,5);b.setLineDash([7,7]);b.strokeStyle='rgba(255,113,137,.53)';b.beginPath();b.moveTo(L,D);b.lineTo(R,D);b.stroke()})();
+const spr=types.map(([e,r,col])=>{const s=document.createElement('canvas'),S=Math.ceil(r*2+4);s.width=s.height=S;const g=s.getContext('2d'),m=S/2;
+  g.beginPath();g.arc(m,m,r,0,Math.PI*2);let gr=g.createRadialGradient(m-r*.35,m-r*.4,2,m,m,r);gr.addColorStop(0,'rgba(255,255,255,.53)');gr.addColorStop(.35,col);gr.addColorStop(1,'#111827');g.fillStyle=gr;g.fill();g.strokeStyle='rgba(255,255,255,.4)';g.lineWidth=2;g.stroke();
+  g.font=`${r*1.25}px sans-serif`;g.textAlign='center';g.textBaseline='middle';g.fillText(e,m,m);return s});
+
+let balls=[],particles=[],score=0,cur=0,nxt=0,lock=false,ended=false,danger=0,last=0,raf=0,px=W/2,dirty=true;
+const rand=()=>Math.floor(Math.random()*5);
+function hud(){scoreEl.textContent=score;nextEl.textContent=types[nxt][0]}
+function draw(){
+  x.drawImage(bg,0,0);
+  if(!ended){x.globalAlpha=.55;x.font=`${RAD[cur]*1.2}px sans-serif`;x.textAlign='center';x.textBaseline='middle';x.fillText(types[cur][0],px,65);x.globalAlpha=1}
+  for(const a of balls){const s=spr[a.level],h=s.width/2;x.drawImage(s,a.x-h,a.y-h)}
+  if(particles.length){for(const p of particles){x.globalAlpha=Math.max(0,p.life);x.fillStyle=p.color;x.fillRect(p.x-p.r,p.y-p.r,p.r*2,p.r*2)}x.globalAlpha=1}
+}
+function drop(v){if(ended||lock)return;let r=RAD[cur];balls.push({x:Math.max(L+r,Math.min(R-r,v)),y:70,vx:0,vy:0,level:cur});cur=nxt;nxt=rand();lock=true;setTimeout(()=>lock=false,350);hud();dirty=true}
+function burst(cx,cy){
+  const colors=['#ffdf70','#ff6b6b','#9cf6ff','#ffffff','#b8ff8b','#d7a5ff'];
+  for(let i=0;i<20;i++){
+    const a=Math.PI*2*i/20+(Math.random()-.5)*.3,speed=100+Math.random()*260;
+    particles.push({x:cx,y:cy,vx:Math.cos(a)*speed,vy:Math.sin(a)*speed,r:1.5+Math.random()*2.5,life:.55+Math.random()*.45,color:colors[i%6]});
+  }
+}
+function finish(){if(ended)return;ended=true;cancelAnimationFrame(raf);$('final').textContent=score;$('over').classList.add('show');draw()}
+function tick(t){
+  if(ended)return;
+  const dt=Math.min(.025,(t-last)/1000||.016);last=t;
+  for(const b of balls){
+    const r=RAD[b.level],ox=b.x,oy=b.y;
+    b.vy=Math.min(1000,b.vy+1500*dt);b.x+=b.vx*dt;b.y+=b.vy*dt;b.vx*=.99;
+    if(b.x<L+r){b.x=L+r;b.vx=Math.abs(b.vx)*.2}
+    if(b.x>R-r){b.x=R-r;b.vx=-Math.abs(b.vx)*.2}
+    if(b.y>F-r){b.y=F-r;b.vy=0;b.vx*=.8}
+    if(Math.abs(b.x-ox)+Math.abs(b.y-oy)>.02)dirty=true;
+  }
+  const n=balls.length;
+  let merged=false;
+  for(let i=0;i<n&&!merged;i++){
+    const a=balls[i],ra=RAD[a.level];
+    for(let j=i+1;j<n;j++){
+      const b=balls[j],m=ra+RAD[b.level],dx=b.x-a.x,dy=b.y-a.y,d2=dx*dx+dy*dy;
+      if(d2>=m*m)continue;           // 距離計算(sqrt)は接触時だけ
+      if(a.level===b.level&&a.level<9){
+        const level=a.level+1,nx=(a.x+b.x)/2,ny=(a.y+b.y)/2;
+        balls.splice(j,1);balls.splice(i,1);
+        if(level===9){score+=1000;burst(nx,ny)}else{balls.push({x:nx,y:ny,vx:0,vy:-100,level});score+=level*10}
+        hud();dirty=true;merged=true;break;
+      }else{
+        const d=Math.sqrt(d2)||.001,o=(m-d)/2,ux=dx/d,uy=dy/d;
+        a.x-=ux*o;b.x+=ux*o;a.y-=uy*o;b.y+=uy*o;a.vy*=.7;b.vy*=.7;
+        if(o>.01)dirty=true;
+      }
+    }
+  }
+  if(particles.length){
+    let k=0;
+    for(const p of particles){p.x+=p.vx*dt;p.y+=p.vy*dt;p.vx*=.96;p.vy=p.vy*.96+260*dt;p.life-=dt;if(p.life>0)particles[k++]=p}
+    particles.length=k;dirty=true;
+  }
+  let hit=false;for(const b of balls){if(b.y-RAD[b.level]<D){hit=true;break}}
+  if(hit)danger+=dt;else danger=0;
+  if(danger>2){finish();return}
+  if(dirty){draw();dirty=false}   // 変化があったフレームだけ描画
+  raf=requestAnimationFrame(tick);
+}
+function reset(){cancelAnimationFrame(raf);balls=[];particles=[];score=0;cur=rand();nxt=rand();lock=false;ended=false;danger=0;last=0;px=W/2;dirty=true;$('over').classList.remove('show');$('msg').textContent='好きな場所をタップ／クリックしてフルーツを落とそう！';hud();draw();raf=requestAnimationFrame(tick)}
+let rect=c.getBoundingClientRect();
+const upd=()=>{rect=c.getBoundingClientRect()};
+addEventListener('resize',upd);addEventListener('scroll',upd);
+function coord(e){return (e.clientX-rect.left)*W/rect.width}
+c.addEventListener('pointermove',e=>{px=Math.max(L+RAD[cur],Math.min(R-RAD[cur],coord(e)));dirty=true});
+c.addEventListener('pointerdown',e=>{e.preventDefault();upd();drop(coord(e))});
+if(!window.PointerEvent){ // 古いSafari用の予備
+  c.addEventListener('mousemove',e=>{px=Math.max(L+RAD[cur],Math.min(R-RAD[cur],coord(e)));dirty=true});
+  c.addEventListener('mousedown',e=>{e.preventDefault();upd();drop(coord(e))});
+  c.addEventListener('touchmove',e=>{e.preventDefault();var t=e.touches[0];px=Math.max(L+RAD[cur],Math.min(R-RAD[cur],coord(t)));dirty=true},false);
+  c.addEventListener('touchstart',e=>{e.preventDefault();upd();drop(coord(e.touches[0]))},false);
+}
+addEventListener('keydown',e=>{
+  if(e.code==='ArrowLeft'){px=Math.max(L+RAD[cur],px-18);dirty=true}
+  else if(e.code==='ArrowRight'){px=Math.min(R-RAD[cur],px+18);dirty=true}
+  else if(e.code==='Space'){e.preventDefault();drop(px)}
+});
+$('reset').onclick=reset;$('again').onclick=reset;reset();
+})();
+</script></body></html>
