@@ -24,20 +24,28 @@ window.onerror=function(m,u,l){var e=document.getElementById('msg');if(e)e.textC
 (()=>{
 const c=document.getElementById('c'),x=c.getContext('2d'),W=420,H=560,L=16,R=404,F=544,D=100;
 const $=id=>document.getElementById(id),scoreEl=$('score'),nextEl=$('next');
-const types=[['🍒',14],['🍓',19],['🍇',25],['🍊',31],['🍎',37],['🍐',43],['🍑',49],['🍍',55],['🍈',62],['🍉',70]];
+const types=[['🍒',14,'#d94d78'],['🍓',19,'#f16b8d'],['🍇',25,'#9861d5'],['🍊',31,'#f2a13d'],['🍎',37,'#e85b55'],['🍐',43,'#a8bd55'],['🍑',49,'#f18e83'],['🍍',55,'#e8bd4d'],['🍈',62,'#79b86e'],['🍉',70,'#e4515e']];
 const RAD=types.map(t=>t[1]);
+const EMOJI_FONT='"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
 
 /* 背景 */
 const bg=document.createElement('canvas');bg.width=W;bg.height=H;
 (()=>{const b=bg.getContext('2d');let g=b.createLinearGradient(0,0,0,H);g.addColorStop(0,'#202d4c');g.addColorStop(1,'#111a30');b.fillStyle=g;b.fillRect(0,0,W,H);b.fillStyle='#53658e';b.fillRect(L-4,30,4,F-30);b.fillRect(R,30,4,F-30);b.fillRect(L-4,F,R-L+8,5);b.setLineDash([7,7]);b.strokeStyle='rgba(255,113,137,.53)';b.beginPath();b.moveTo(L,D);b.lineTo(R,D);b.stroke()})();
 
-/* OS標準の絵文字をそのまま描くためのスプライト */
-const spr=types.map(([e,r])=>{
-  const S=Math.ceil(r*2.6),s=document.createElement('canvas');s.width=s.height=S;
-  const g=s.getContext('2d');
-  g.font=`${Math.round(r*2.1)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+/* 色付き円 + OS標準絵文字 */
+const spr=types.map(([e,r,col])=>{
+  const S=Math.ceil(r*2+4),s=document.createElement('canvas');s.width=s.height=S;
+  const g=s.getContext('2d'),m=S/2;
+  g.beginPath();g.arc(m,m,r,0,Math.PI*2);
+  let gr=g.createRadialGradient(m-r*.35,m-r*.4,2,m,m,r);
+  gr.addColorStop(0,'rgba(255,255,255,.53)');
+  gr.addColorStop(.35,col);
+  gr.addColorStop(1,'#111827');
+  g.fillStyle=gr;g.fill();
+  g.strokeStyle='rgba(255,255,255,.4)';g.lineWidth=2;g.stroke();
+  g.font=`${Math.round(r*1.25)}px ${EMOJI_FONT}`;
   g.textAlign='center';g.textBaseline='middle';
-  g.fillText(e,S/2,S/2+S*0.04);
+  g.fillText(e,m,m);
   return s;
 });
 
@@ -46,11 +54,22 @@ const rand=()=>Math.floor(Math.random()*5);
 function hud(){scoreEl.textContent=score;nextEl.textContent=types[nxt][0]}
 function draw(){
   x.drawImage(bg,0,0);
-  if(!ended){x.globalAlpha=.55;x.font=`${RAD[cur]*1.6}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;x.textAlign='center';x.textBaseline='middle';x.fillText(types[cur][0],px,65);x.globalAlpha=1}
+  if(!ended){
+    x.globalAlpha=.55;
+    x.font=`${RAD[cur]*1.2}px ${EMOJI_FONT}`;
+    x.textAlign='center';x.textBaseline='middle';
+    x.fillText(types[cur][0],px,65);
+    x.globalAlpha=1;
+  }
   for(const a of balls){const s=spr[a.level],h=s.width/2;x.drawImage(s,a.x-h,a.y-h)}
   if(particles.length){for(const p of particles){x.globalAlpha=Math.max(0,p.life);x.fillStyle=p.color;x.fillRect(p.x-p.r,p.y-p.r,p.r*2,p.r*2)}x.globalAlpha=1}
 }
-function drop(v){if(ended||lock)return;let r=RAD[cur];balls.push({x:Math.max(L+r,Math.min(R-r,v)),y:70,vx:0,vy:0,level:cur});cur=nxt;nxt=rand();lock=true;setTimeout(()=>lock=false,280);hud();dirty=true}
+function drop(v){
+  if(ended||lock)return;
+  let r=RAD[cur];
+  balls.push({x:Math.max(L+r,Math.min(R-r,v)),y:70,vx:0,vy:0,level:cur});
+  cur=nxt;nxt=rand();lock=true;setTimeout(()=>lock=false,280);hud();dirty=true;
+}
 function burst(cx,cy){
   const colors=['#ffdf70','#ff6b6b','#9cf6ff','#ffffff','#b8ff8b','#d7a5ff'];
   for(let i=0;i<20;i++){
@@ -64,7 +83,7 @@ function tick(t){
   const dt=Math.min(.025,(t-last)/1000||.016);last=t;
   for(const b of balls){
     const r=RAD[b.level],ox=b.x,oy=b.y;
-    /* 速さアップ: 重力と最大速度を強化 */
+    /* スピーディーな落下 */
     b.vy=Math.min(1700,b.vy+2800*dt);
     b.x+=b.vx*dt;b.y+=b.vy*dt;b.vx*=.99;
     if(b.x<L+r){b.x=L+r;b.vx=Math.abs(b.vx)*.2}
@@ -102,7 +121,10 @@ function tick(t){
   if(dirty){draw();dirty=false}
   raf=requestAnimationFrame(tick);
 }
-function reset(){cancelAnimationFrame(raf);balls=[];particles=[];score=0;cur=rand();nxt=rand();lock=false;ended=false;danger=0;last=0;px=W/2;dirty=true;$('over').classList.remove('show');$('msg').textContent='好きな場所をタップ／クリックしてフルーツを落とそう！';hud();draw();raf=requestAnimationFrame(tick)}
+function reset(){
+  cancelAnimationFrame(raf);balls=[];particles=[];score=0;cur=rand();nxt=rand();lock=false;ended=false;danger=0;last=0;px=W/2;dirty=true;
+  $('over').classList.remove('show');$('msg').textContent='好きな場所をタップ／クリックしてフルーツを落とそう！';hud();draw();raf=requestAnimationFrame(tick);
+}
 let rect=c.getBoundingClientRect();
 const upd=()=>{rect=c.getBoundingClientRect()};
 addEventListener('resize',upd);addEventListener('scroll',upd);
