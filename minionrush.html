@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ミニオンラッシュ風ランナー</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:#101426;color:#fff;
+    font-family:system-ui,-apple-system,"Noto Sans JP",sans-serif;
+    display:grid;place-items:center;min-height:100dvh;padding:12px;
+    overscroll-behavior:none;user-select:none;-webkit-user-select:none;
+  }
+  main{width:min(100%,480px);background:#18213a;border:1px solid #405078;border-radius:18px;padding:14px}
+  h1{font-size:clamp(20px,5vw,28px);text-align:center;margin-bottom:10px}
+  .hud{display:flex;justify-content:space-between;gap:8px;margin-bottom:10px}
+  .box{flex:1;background:#101a30;border:1px solid #405078;border-radius:10px;padding:8px;text-align:center}
+  .box small{display:block;color:#aab6d4;font-size:11px}
+  .box b{font-size:20px}
+  canvas{width:100%;height:auto;display:block;background:#0d1225;border:2px solid #52648d;border-radius:12px;touch-action:none}
+  .help{margin-top:10px;text-align:center;color:#b8c3df;font-size:12px;line-height:1.6}
+  .overlay{position:fixed;inset:0;background:#000b;display:none;place-items:center;padding:16px;z-index:5}
+  .overlay.show{display:grid}
+  .dialog{background:#202b49;border:1px solid #6879a5;border-radius:16px;padding:24px;text-align:center;width:min(320px,100%)}
+  button{border:0;border-radius:10px;padding:12px 20px;background:#ffd83d;color:#222;font-weight:800;font-size:15px;cursor:pointer;margin-top:12px}
+</style>
+</head>
+<body>
+<main>
+  <h1>🍌 ミニオンラッシュ風</h1>
+  <div class="hud">
+    <div class="box"><small>SCORE</small><b id="score">0</b></div>
+    <div class="box"><small>BANANA</small><b id="banana">0</b></div>
+    <div class="box"><small>SPEED</small><b id="speed">1.0x</b></div>
+  </div>
+  <canvas id="game" width="420" height="620"></canvas>
+  <p class="help">
+    ← → : レーン移動 ／ ↑ or スワイプ上 : ジャンプ<br>
+    ↓ or スワイプ下 : スライディング<br>
+    障害物を避けてバナナを集めよう！
+  </p>
+</main>
+
+<div class="overlay" id="over">
+  <div class="dialog">
+    <h2>ゲームオーバー</h2>
+    <p id="result"></p>
+    <button id="retry">もう一度遊ぶ</button>
+  </div>
+</div>
+
+<script>
+(()=>{
+const cv=document.getElementById('game'),g=cv.getContext('2d');
+const W=cv.width,H=cv.height;
+const scoreEl=document.getElementById('score'),bananaEl=document.getElementById('banana'),speedEl=document.getElementById('speed');
+const over=document.getElementById('over'),result=document.getElementById('result');
+
+const LANES=[110,210,310];
+let player,obstacles,bananas,particles,score,bananasGot,speed,distance,running,last,spawnTimer,bananaTimer;
+
+function reset(){
+  player={lane:1,x:LANES[1],y:430,vy:0,jumping:false,sliding:false,slideTime:0,invincible:0};
+  obstacles=[];bananas=[];particles=[];
+  score=0;bananasGot=0;speed=1;distance=0;
+  spawnTimer=0;bananaTimer=0;last=0;running=true;
+  over.classList.remove('show');
+  updateHUD();
+  requestAnimationFrame(loop);
+}
+
+function updateHUD(){
+  scoreEl.textContent=Math.floor(score);
+  bananaEl.textContent=bananasGot;
+  speedEl.textContent=speed.toFixed(1)+'x';
+}
+
+function spawnObstacle(){
+  const lane=Math.floor(Math.random()*3);
+  const kind=Math.random()<0.45?'low':'high'; // low=滑れる, high=飛び越える
+  obstacles.push({lane,x:W+60,y:kind==='low'?470:360,w:46,h:kind==='low'?60:70,kind});
+  if(Math.random()<0.35){
+    const lane2=(lane+1+Math.floor(Math.random()*2))%3;
+    obstacles.push({lane:lane2,x:W+60,y:470,w:46,h:60,kind:'low'});
+  }
+}
+
+function spawnBanana(){
+  const lane=Math.floor(Math.random()*3);
+  const count=2+Math.floor(Math.random()*3);
+  for(let i=0;i<count;i++){
+    bananas.push({lane,x:W+60+i*38,y:400,w:26,h:26,got:false});
+  }
+}
+
+function jump(){
+  if(!running)return;
+  if(!player.jumping){
+    player.jumping=true;player.sliding=false;
+    player.vy=-720;
+  }
+}
+
+function slide(){
+  if(!running)return;
+  if(!player.jumping){
+    player.sliding=true;player.slideTime=0.55;
+  }
+}
+
+function moveLane(dir){
+  if(!running)return;
+  player.lane=Math.max(0,Math.min(2,player.lane+dir));
+}
+
+addEventListener('keydown',e=>{
+  if(e.code==='ArrowLeft')moveLane(-1);
+  else if(e.code==='ArrowRight')moveLane(1);
+  else if(e.code==='ArrowUp'||e.code==='Space'){e.preventDefault();jump()}
+  else if(e.code==='ArrowDown'){e.preventDefault();slide()}
+});
+
+let touchStart=null;
+cv.addEventListener('pointerdown',e=>{touchStart={x:e.clientX,y:e.clientY}});
+cv.addEventListener('pointerup',e=>{
+  if(!touchStart)return;
+  const dx=e.clientX-touchStart.x,dy=e.clientY-touchStart.y;
+  if(Math.abs(dx)>Math.abs(dy)){
+    if(dx>30)moveLane(1);else if(dx<-30)moveLane(-1);
+  }else{
+    if(dy<-30)jump();else if(dy>30)slide();
+  }
+  touchStart=null;
+});
+
+function burst(x,y,color){
+  for(let i=0;i<12;i++){
+    const a=Math.random()*Math.PI*2,s=80+Math.random()*180;
+    particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.4+Math.random()*.3,color});
+  }
+}
+
+function gameOver(){
+  running=false;
+  result.innerHTML=`スコア: <b>${Math.floor(score)}</b><br>バナナ: <b>${bananasGot}</b>本`;
+  over.classList.add('show');
+}
+
+function update(dt){
+  distance+=260*speed*dt;
+  score+=18*speed*dt;
+  speed=Math.min(3.2,1+distance/4500);
+  updateHUD();
+
+  player.x+=(LANES[player.lane]-player.x)*Math.min(1,dt*14);
+
+  if(player.jumping){
+    player.vy+=2100*dt;
+    player.y+=player.vy*dt;
+    if(player.y>=430){player.y=430;player.vy=0;player.jumping=false}
+  }
+
+  if(player.sliding){
+    player.slideTime-=dt;
+    if(player.slideTime<=0)player.sliding=false;
+  }
+
+  if(player.invincible>0)player.invincible-=dt;
+
+  spawnTimer-=dt;
+  if(spawnTimer<=0){
+    spawnObstacle();
+    spawnTimer=Math.max(.55,1.25/speed);
+  }
+
+  bananaTimer-=dt;
+  if(bananaTimer<=0){
+    spawnBanana();
+    bananaTimer=1.2+Math.random()*1.2;
+  }
+
+  const move=340*speed*dt;
+  for(const o of obstacles)o.x-=move;
+  for(const b of bananas)b.x-=move;
+
+  obstacles=obstacles.filter(o=>o.x+o.w>-20);
+  bananas=bananas.filter(b=>b.x+b.w>-20&&!b.got);
+
+  const px=player.x,py=player.y;
+  const pw=44,ph=player.sliding?34:64;
+
+  for(const o of obstacles){
+    const ox=LANES[o.lane]-o.w/2;
+    if(px+pw/2>ox&&px-pw/2<ox+o.w){
+      const oTop=o.y,oBottom=o.y+o.h;
+      const pTop=py-ph,pBottom=py;
+      if(pBottom>oTop&&pTop<oBottom&&player.invincible<=0){
+        burst(px,py-30,'#ff5b5b');
+        gameOver();
+        return;
+      }
+    }
+  }
+
+  for(const b of bananas){
+    const bx=LANES[b.lane]-b.w/2;
+    if(px+pw/2>bx&&px-pw/2<bx+b.w&&py>b.y&&py-b.h<b.y+b.h){
+      b.got=true;bananasGot++;score+=50;
+      burst(bx+b.w/2,b.y+b.h/2,'#ffd83d');
+      updateHUD();
+    }
+  }
+
+  for(const p of particles){
+    p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=500*dt;p.life-=dt;
+  }
+  particles=particles.filter(p=>p.life>0);
+}
+
+function drawMinion(x,y,w,h,sliding){
+  g.save();
+  // 体
+  g.fillStyle='#ffd83d';
+  g.beginPath();
+  g.roundRect(x-w/2,y-h,w,h,h/2.2);
+  g.fill();
+  // オーバーオール
+  g.fillStyle='#3b6fd4';
+  g.fillRect(x-w/2,y-h*0.42,w,h*0.42);
+  g.fillRect(x-w*0.16,y-h*0.55,w*0.32,h*0.2);
+  // ゴーグル
+  g.fillStyle='#222';
+  g.beginPath();g.arc(x,y-h*0.72,w*0.30,0,Math.PI*2);g.fill();
+  g.fillStyle='#ddd';
+  g.beginPath();g.arc(x,y-h*0.72,w*0.23,0,Math.PI*2);g.fill();
+  g.fillStyle='#7b4a21';
+  g.beginPath();g.arc(x,y-h*0.72,w*0.11,0,Math.PI*2);g.fill();
+  g.fillStyle='#111';
+  g.beginPath();g.arc(x,y-h*0.72,w*0.05,0,Math.PI*2);g.fill();
+  // 口
+  g.strokeStyle='#7b4a21';g.lineWidth=2;
+  g.beginPath();
+  if(sliding)g.arc(x,y-h*0.45,w*0.13,Math.PI,0);
+  else g.arc(x,y-h*0.5,w*0.13,0,Math.PI);
+  g.stroke();
+  g.restore();
+}
+
+function draw(){
+  g.clearRect(0,0,W,H);
+
+  // 空
+  const sky=g.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,'#20315c');
+  sky.addColorStop(1,'#101828');
+  g.fillStyle=sky;g.fillRect(0,0,W,H);
+
+  // 地面
+  g.fillStyle='#2b3a5e';
+  g.fillRect(0,500,W,H-500);
+  g.strokeStyle='#4a5f8f';g.lineWidth=3;
+  g.beginPath();g.moveTo(0,500);g.lineTo(W,500);g.stroke();
+
+  // レーン
+  g.strokeStyle='#3d4f7c';g.lineWidth=2;
+  for(const lx of [160,260]){
+    g.beginPath();g.moveTo(lx,500);g.lineTo(lx,H);g.stroke();
+  }
+
+  // 走行ライン
+  g.strokeStyle='#55688f';g.lineWidth=4;
+  const offset=distance%60;
+  for(let i=-1;i<12;i++){
+    const y=520+i*60+offset;
+    g.beginPath();g.moveTo(40,y);g.lineTo(W-40,y);g.stroke();
+  }
+
+  // バナナ
+  for(const b of bananas){
+    const x=LANES[b.lane]-b.w/2;
+    g.font='26px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+    g.textAlign='center';g.textBaseline='middle';
+    g.fillText('🍌',x+b.w/2,b.y+b.h/2);
+  }
+
+  // 障害物
+  for(const o of obstacles){
+    const x=LANES[o.lane]-o.w/2;
+    if(o.kind==='low'){
+      g.fillStyle='#8a5a2b';
+      g.beginPath();g.roundRect(x,o.y,o.w,o.h,8);g.fill();
+      g.fillStyle='#a9743a';
+      g.fillRect(x+6,o.y+8,o.w-12,10);
+    }else{
+      g.fillStyle='#d1495b';
+      g.beginPath();g.roundRect(x,o.y,o.w,o.h,10);g.fill();
+      g.fillStyle='#ff8296';
+      g.fillRect(x+8,o.y+10,o.w-16,12);
+    }
+  }
+
+  // プレイヤー
+  if(player.invincible<=0||Math.floor(player.invincible*12)%2===0){
+    drawMinion(player.x,player.y,44,player.sliding?34:64,player.sliding);
+  }
+
+  // パーティクル
+  for(const p of particles){
+    g.globalAlpha=Math.max(0,p.life);
+    g.fillStyle=p.color;
+    g.fillRect(p.x-3,p.y-3,6,6);
+  }
+  g.globalAlpha=1;
+}
+
+function loop(t){
+  if(!running)return;
+  const dt=Math.min(.033,(t-last)/1000||.016);
+  last=t;
+  update(dt);
+  if(running){
+    draw();
+    requestAnimationFrame(loop);
+  }
+}
+
+document.getElementById('retry').onclick=reset;
+reset();
+})();
+</script>
+</body>
+</html>
